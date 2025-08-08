@@ -157,3 +157,6 @@ cscope.po.out
 
 
 # End of https://www.gitignore.io/api/tags
+
+# Ignore build artifacts
+build/

@@ -19,7 +19,8 @@ FindEntryFunctions::FindEntryFunctions(const clang::CXXRecordDecl *d,
       constructor_stmt_{nullptr},
       pass_{1},
       ctor_decl_{nullptr},
-      process_me_{nullptr} {
+      process_me_{nullptr},
+      ef{nullptr} {
   /// Pass_ 1:
   /// Find the constructor definition, and the Stmt* that has the code for it.
   /// Set the constructor_stmt_ pointer.
@@ -62,13 +63,13 @@ bool FindEntryFunctions::VisitMemberExpr(MemberExpr *e) {
       // os_ <<"\n member name : " <<memberName;
 
       // os_ << "####: MemberExpr -- " << memberName << "\n";
-      if (memberName == "create_method_process") {
+      if (memberName == "create_method_process" || memberName == "declare_method_process") {
         proc_type_ = PROCESS_TYPE::METHOD;
         process_me_ = e;
-      } else if (memberName == "create_thread_process") {
+      } else if (memberName == "create_thread_process" || memberName == "declare_thread_process") {
         proc_type_ = PROCESS_TYPE::THREAD;
         process_me_ = e;
-      } else if (memberName == "create_cthread_process") {
+      } else if (memberName == "create_cthread_process" || memberName == "declare_cthread_process") {
         proc_type_ = PROCESS_TYPE::CTHREAD;
         process_me_ = e;
       }
@@ -111,8 +112,10 @@ bool FindEntryFunctions::VisitStringLiteral(StringLiteral *s) {
         ef->addResetType(reset_matcher.getResetType());
       }
 
-      if (proc_type_ != PROCESS_TYPE::NONE) {
+      if (proc_type_ != PROCESS_TYPE::NONE && ef != nullptr) {
         entry_function_list_.push_back(ef);
+        // Avoid accidental reuse if VisitStringLiteral is called again
+        ef = nullptr;
       }
       /*    ef->constructor_stmt_ = constructor_stmt_;
             ef->entry_name_ = entry_name_;

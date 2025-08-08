@@ -139,18 +139,22 @@ int sc_main(int argc, char *argv[]) {
   // Want to find an instance named "testing".
 
   ModuleInstance *test_module{model->getInstance("testing")};
-  auto processes{test_module->getProcessMap()};
-  auto first_proc{processes.begin()};
-  ProcessDecl *proc{first_proc->second};
-
   CHECK(test_module != nullptr);
+
+  auto processes{test_module->getProcessMap()};
   CHECK(processes.size() == 2);
+
+  auto first_proc{processes.begin()};
   CHECK(first_proc != processes.end());
+
+  // Avoid null deref if map contents are unexpected
+  ProcessDecl *proc{first_proc->second};
 
   llvm::dbgs() << "PROCESS: " << first_proc->first << "\n";
 
   // Get access to the sensitivity list.
-  EntryFunctionContainer *ef{proc->getEntryFunction()};
+  EntryFunctionContainer *ef{proc ? proc->getEntryFunction() : nullptr};
+  CHECK(ef != nullptr);
   EntryFunctionContainer::SenseMapType sensitivity_list{ef->getSenseMap()};
 
   std::vector<std::string> arg_names{
@@ -179,15 +183,15 @@ int sc_main(int argc, char *argv[]) {
     for (auto const &call : entry) {
       VarDecl *to_get_process_handle{std::get<3>(call)};
       auto process_handle_name{
-          to_get_process_handle->getNameAsString()};
+          to_get_process_handle ? to_get_process_handle->getNameAsString() : std::string{""}};
       std::string sig_name { std::get<0>(call)};
       clang::ValueDecl* vdecl{ std::get<1>(call)};
 
       llvm::dbgs() << "name is " << sig_name << "\n";
       llvm::dbgs() << "value decl is\n";
-      vdecl->dump();
+      if (vdecl) vdecl->dump();
       llvm::dbgs() << "vd is\n";
-      to_get_process_handle->dump();
+      if (to_get_process_handle) to_get_process_handle->dump();
       llvm::dbgs() << "default output is \n";
 
       llvm::dbgs() << process_handle_name << "  " << std::get<0>(call) << "  "

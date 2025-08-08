@@ -165,7 +165,8 @@ std::vector<const clang::CXXRecordDecl *> getAllBaseClasses(
 
     /// Do not insert into bases the decl class.
     if ((top_decl != decl) && (name != "sc_object") &&
-        (name != "sc_process_host") && (name != "sc_module")) {
+        (name != "sc_process_host") && (name != "sc_module") &&
+        (name != "sc_object_host")) {
       LLVM_DEBUG(llvm::dbgs() << "+ Insert into bases\n";);
       bases.push_back(top_decl);
     }
