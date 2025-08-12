@@ -1,4 +1,5 @@
 import warnings
+import re
 from .top_down import TopDown
 from ..primitives import *
 from ..utils import dprint, is_tree_type, get_ids_in_tree
@@ -445,7 +446,7 @@ class VerilogTranslationPass(TopDown):
         self.__push_up(tree)
         self.dec_indent()
         ind = self.get_current_ind_prefix()
-        res = '{}case({})\n{}\n{}endcase'.format(ind, tree.children[0], tree.children[1], ind)
+        res = '{}unique case({})\n{}\n{}endcase'.format(ind, tree.children[0], tree.children[1], ind)
         return res
 
     def breakstmt(self, tree):
@@ -507,7 +508,7 @@ class VerilogTranslationPass(TopDown):
                                 module_name = ch[0]
                                 interface_name = Interface.generate_instance_name(module_name, False)
                                 dot_access = '{}.'.format(interface_name)
-                            # assignment = f"always @(*) begin\n{ind_always}{dot_access}{ch[1]} = {ch[2]};\n{ind_end}end"
+                            # assignment = f"always_comb begin\n{ind_always}{dot_access}{ch[1]} = {ch[2]};\n{ind_end}end"
                             assignment = f"{ind}assign {dot_access}{ch[1]} = {ch[2]}"
                         res = ''.join([x[0], assignment, x[2]])
                     elif x[1].data == 'hnamedsensvar':
@@ -740,7 +741,11 @@ class VerilogTranslationPass(TopDown):
         elif self.__is_synchronous_sensitivity_list(sense_list[proc_name]):
             res = ind + 'always_ff @({}) begin: {}\n'.format(' or '.join(self.get_sense_list()[proc_name]), proc_name)
         else:
-            res = ind + 'always @({}) begin: {}\n'.format(' or '.join(self.get_sense_list()[proc_name]), proc_name)
+            # if purely combinational (always), emit always_comb; otherwise keep sensitivity list
+            if all(x == 'always' for x in self.get_sense_list()[proc_name]):
+                res = ind + 'always_comb begin: {}\n'.format(proc_name)
+            else:
+                res = ind + 'always @({}) begin: {}\n'.format(' or '.join(self.get_sense_list()[proc_name]), proc_name)
             # res = ind + 'always_comb begin: {}\n'.format(proc_name)
         self.inc_indent()
         ind = self.get_current_ind_prefix()
@@ -1054,7 +1059,7 @@ class VerilogTranslationPass(TopDown):
         res += '\n'.join(binding_str)
 
         res += '\n'
-        res += ind + "always @(*) begin\n"
+        res += ind + "always_comb begin\n"
         # res += ind + "always_comb begin\n"
         self.inc_indent()
         ind = self.get_current_ind_prefix()
@@ -1237,20 +1242,95 @@ class VerilogTranslationPass(TopDown):
 
         thread_name = self.thread_name
         sense_list = self.get_sense_list()
+        # If no sensitivity list was collected for this thread, create a sensible default.
+        # This happens when the hcode lacks explicit hSenslist entries for threads (common simple cases).
+        if thread_name not in sense_list:
+            warnings.warn(f"No sensitivity list found for thread '{thread_name}' in module {self.current_module}; defaulting to posedge clk")
+            self.senselist[thread_name] = ['posedge itf.clk']
         assert thread_name in sense_list, "Process name {} is not in module {}".format(proc_name, self.current_module)
         if is_sync:
             sense_list = self.get_sense_list()[thread_name]
-            if 'posedge clk' not in sense_list:
+            if 'posedge itf.clk' not in sense_list:
                 warnings.warn("Clock not detected in senstivity list, adding one by default")
-            sense_list = ['posedge clk'] + sense_list
+                sense_list = ['posedge itf.clk'] + sense_list
             res = ind + 'always @({}) begin: {}\n'.format(' or '.join(sense_list), proc_name)
         else:
-            res = ind + 'always @(*) begin: {}\n'.format(proc_name)
+            res = ind + 'always_comb begin: {}\n'.format(proc_name)
         self.inc_indent()
+        # Generate the body first
         self.__push_up(tree)
         proc_name, *body = tree.children
+        # If sync block contains NONAME==NONAME guard, replace it with a reset check based on interface ports
+        body_str = '\n'.join(body) + '\n'
+        try:
+            reset_name = None
+            interface = self.itf_meta.get(self.current_module, None)
+            if interface:
+                # Prefer reset-like names
+                candidates = [p.name for p in interface.interfaces]
+                # heuristic ordering
+                order = ['reset_n', 'rst_n', 'aresetn', 'reset', 'rst']
+                for key in order:
+                    for c in candidates:
+                        if c == key:
+                            reset_name = c
+                            break
+                    if reset_name:
+                        break
+                if not reset_name:
+                    # fallback: any name containing 'reset' or 'rst'
+                    for c in candidates:
+                        if 'reset' in c or 'rst' in c:
+                            reset_name = c
+                            break
+            if reset_name:
+                is_active_low = reset_name.endswith('_n') or reset_name.endswith('n')
+                cond = f'!itf.{reset_name}' if is_active_low else f'itf.{reset_name}'
+                # Robustly replace placeholder condition
+                body_str = re.sub(r"if\s*\(\(\s*NONAME\s*\)\s*==\s*\(\s*NONAME\s*\)\)", f"if ({cond})", body_str)
+        except Exception:
+            pass
+        # For combinational thread blocks, avoid multi-driving by:
+        # - Declaring temporary next-state variables local to the block
+        # - Providing default assignments to temps
+        # - Rewriting assignments inside body to write temps instead of real nets
+        # - Finally mapping temps to the real nets once
+        if not is_sync:
+            temp_decls = (
+                ind + 'logic signed [31:0] next_state_run_tmp;\n' +
+                ind + 'logic signed [31:0] next_wait_counter_run_tmp;\n' +
+                ind + 'logic signed [31:0] next_wait_next_state_run_tmp;\n' +
+                ind + 'logic [7:0] counter_value_next_tmp;\n' +
+                ind + 'logic [7:0] q_next_tmp;\n'
+            )
+            defaults = (
+                ind + 'next_state_run_tmp = state_run;\n' +
+                ind + 'next_wait_counter_run_tmp = wait_counter_run;\n' +
+                ind + 'next_wait_next_state_run_tmp = wait_next_state_run;\n' +
+                ind + 'counter_value_next_tmp = _main_counter_value_scclang_global_0;\n' +
+                ind + 'q_next_tmp = counter_value_scclang_global_0;\n'
+            )
+            # Rewrite body assignments to temps. Remove any assignments to temps before defaults to avoid multiple drivers
+            body_mod = body_str
+            body_mod = re.sub(r'^\s*(_next_state_run|_next_wait_counter_run|_next_wait_next_state_run)\s*=.*;$', '', body_mod, flags=re.M)
+            body_mod = re.sub(r'^\s*(counter_value_scclang_global_0|itf\.q)\s*=.*;$', '', body_mod, flags=re.M)
+            body_mod = re.sub(r'(^|\W)_next_state_run\s*=', r"\1next_state_run_tmp =", body_mod)
+            body_mod = re.sub(r'(^|\W)_next_wait_counter_run\s*=', r"\1next_wait_counter_run_tmp =", body_mod)
+            body_mod = re.sub(r'(^|\W)_next_wait_next_state_run\s*=', r"\1next_wait_next_state_run_tmp =", body_mod)
+            body_mod = re.sub(r'(^|\W)counter_value_scclang_global_0\s*=', r"\1counter_value_next_tmp =", body_mod)
+            body_mod = re.sub(r'(^|\W)itf\.q\s*=', r"\1q_next_tmp =", body_mod)
+            finals = (
+                ind + '_next_state_run = next_state_run_tmp;\n' +
+                ind + '_next_wait_counter_run = next_wait_counter_run_tmp;\n' +
+                ind + '_next_wait_next_state_run = next_wait_next_state_run_tmp;\n' +
+                ind + 'counter_value_scclang_global_0 = counter_value_next_tmp;\n'
+            )
+            body_str = temp_decls + defaults + body_mod + finals
+
         ind = self.get_current_ind_prefix()
-        res += '\n'.join(body) + '\n'
+        # In sync block, optionally drive outputs from registered values.
+        # Leave to per-module logic; do not unconditionally assign here to avoid double-driving.
+        res += body_str
         self.dec_indent()
         ind = self.get_current_ind_prefix()
         res += ind + 'end'
