@@ -21,7 +21,6 @@ SC_MODULE(Counter) {
   }
 
   void run() {
-    // Initialize outputs/state
     counter_value = 0;
     q.write(counter_value);
     wait();

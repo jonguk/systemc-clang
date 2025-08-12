@@ -1,0 +1,40 @@
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+[Detaching after fork from child process 583211]
+process 583208 is executing new program: /home/jonguk/Projects/CXL_SWITCH/systemc-clang/build/systemc-clang
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+
+Program received signal SIGSEGV, Segmentation fault.
+0x0000555555d31d5b in systemc_hdl::HDLConstructorHcode::UnrollSensitem(hnode::hNode*&, std::vector<systemc_hdl::HDLConstructorHcode::for_info_t, std::allocator<systemc_hdl::HDLConstructorHcode::for_info_t> >&) ()
+#0  0x0000555555d31d5b in systemc_hdl::HDLConstructorHcode::UnrollSensitem(hnode::hNode*&, std::vector<systemc_hdl::HDLConstructorHcode::for_info_t, std::allocator<systemc_hdl::HDLConstructorHcode::for_info_t> >&) ()
+#1  0x0000555555d31f75 in systemc_hdl::HDLConstructorHcode::HDLLoop(hnode::hNode*&, std::vector<systemc_hdl::HDLConstructorHcode::for_info_t, std::allocator<systemc_hdl::HDLConstructorHcode::for_info_t> >&) ()
+#2  0x0000555555d32673 in systemc_hdl::HDLConstructorHcode::ProcessCXXConstructorHcode(hnode::hNode*) ()
+#3  0x0000555555ce2628 in systemc_hdl::HDLMain::SCmodule2hcode(systemc_clang::ModuleInstance*, hnode::hNode*&, llvm::raw_fd_ostream&) ()
+#4  0x0000555555ce7dfa in systemc_hdl::HDLMain::postFire() ()
+#5  0x00005555561cd7db in clang::ParseAST(clang::Sema&, bool, bool) ()
+#6  0x0000555555e0e057 in clang::FrontendAction::Execute() ()
+#7  0x0000555555d7fed6 in clang::CompilerInstance::ExecuteAction(clang::FrontendAction&) ()
+#8  0x0000555555d4eb31 in clang::tooling::FrontendActionFactory::runInvocation(std::shared_ptr<clang::CompilerInvocation>, clang::FileManager*, std::shared_ptr<clang::PCHContainerOperations>, clang::DiagnosticConsumer*) ()
+#9  0x0000555555d4e89f in clang::tooling::ToolInvocation::runInvocation(char const*, clang::driver::Compilation*, std::shared_ptr<clang::CompilerInvocation>, std::shared_ptr<clang::PCHContainerOperations>) ()
+#10 0x0000555555d4d7df in clang::tooling::ToolInvocation::run() ()
+#11 0x0000555555d503ce in clang::tooling::ClangTool::run(clang::tooling::ToolAction*) ()
+#12 0x0000555555ca541d in systemc_hdl::HDLPluginAction::HDLPluginAction(int, char const**) ()
+#13 0x0000555555c8b623 in main ()
+No symbol table info available.
+
+Thread 1 (Thread 0x7ffff7df6f80 (LWP 583208) "systemc-clang"):
+#0  0x0000555555d31d5b in systemc_hdl::HDLConstructorHcode::UnrollSensitem(hnode::hNode*&, std::vector<systemc_hdl::HDLConstructorHcode::for_info_t, std::allocator<systemc_hdl::HDLConstructorHcode::for_info_t> >&) ()
+#1  0x0000555555d31f75 in systemc_hdl::HDLConstructorHcode::HDLLoop(hnode::hNode*&, std::vector<systemc_hdl::HDLConstructorHcode::for_info_t, std::allocator<systemc_hdl::HDLConstructorHcode::for_info_t> >&) ()
+#2  0x0000555555d32673 in systemc_hdl::HDLConstructorHcode::ProcessCXXConstructorHcode(hnode::hNode*) ()
+#3  0x0000555555ce2628 in systemc_hdl::HDLMain::SCmodule2hcode(systemc_clang::ModuleInstance*, hnode::hNode*&, llvm::raw_fd_ostream&) ()
+#4  0x0000555555ce7dfa in systemc_hdl::HDLMain::postFire() ()
+#5  0x00005555561cd7db in clang::ParseAST(clang::Sema&, bool, bool) ()
+#6  0x0000555555e0e057 in clang::FrontendAction::Execute() ()
+#7  0x0000555555d7fed6 in clang::CompilerInstance::ExecuteAction(clang::FrontendAction&) ()
+#8  0x0000555555d4eb31 in clang::tooling::FrontendActionFactory::runInvocation(std::shared_ptr<clang::CompilerInvocation>, clang::FileManager*, std::shared_ptr<clang::PCHContainerOperations>, clang::DiagnosticConsumer*) ()
+#9  0x0000555555d4e89f in clang::tooling::ToolInvocation::runInvocation(char const*, clang::driver::Compilation*, std::shared_ptr<clang::CompilerInvocation>, std::shared_ptr<clang::PCHContainerOperations>) ()
+#10 0x0000555555d4d7df in clang::tooling::ToolInvocation::run() ()
+#11 0x0000555555d503ce in clang::tooling::ClangTool::run(clang::tooling::ToolAction*) ()
+#12 0x0000555555ca541d in systemc_hdl::HDLPluginAction::HDLPluginAction(int, char const**) ()
+#13 0x0000555555c8b623 in main ()

@@ -283,6 +283,14 @@ namespace systemc_hdl {
     
   void HDLConstructorHcode::UnrollSensitem(hNodep &hp_orig, std::vector<for_info_t> &for_info) {
 
+    // Defensive checks for null/malformed nodes
+    if (hp_orig == nullptr) {
+      return;
+    }
+    if (hp_orig->child_list.size() == 0 || hp_orig->child_list[0] == nullptr) {
+      return;
+    }
+
     // hBinop << [
     //      hVarref sensitive NOLIST
     //      hNoop pos [
@@ -297,12 +305,18 @@ namespace systemc_hdl {
 
     // at a primitive sens item
     hNodep hp = HnodeDeepCopy(hp_orig); // need to keep the subtrees when the original tree gets released
+    if (hp == nullptr || hp->child_list.size() == 0 || hp->child_list[0] == nullptr) {
+      return;
+    }
 
     hp->h_op = hNode::hdlopsEnum::hSensvar;
     hp->h_name = noname;
     
-    delete hp->child_list[0]; // release that hnode
-    hp->child_list.erase(hp->child_list.begin()); // remove the first item
+    // Release and erase first child safely
+    if (hp->child_list.size() > 0 && hp->child_list[0] != nullptr) {
+      delete hp->child_list[0];
+      hp->child_list.erase(hp->child_list.begin());
+    }
     // if (!for_info.empty()) {
     //   SubstituteIndex(hp, for_info);
     //}
@@ -315,15 +329,17 @@ namespace systemc_hdl {
     //      ]
     //    ]
 
-    if (isEdge(hp->child_list[0]->h_name)) {
+    if (hp->child_list.size() > 0 && hp->child_list[0] != nullptr && isEdge(hp->child_list[0]->h_name)) {
       hNodep hedge = hp->child_list[0];
-      hp->child_list[0] = hedge->child_list[0];
-      hedge->child_list.pop_back();
-      hp->child_list.push_back(hedge);
+      if (hedge->child_list.size() > 0) {
+        hp->child_list[0] = hedge->child_list[0];
+        hedge->child_list.pop_back();
+        hp->child_list.push_back(hedge);
+      }
     }
     else {
       
-      if (isSimEvent(hp->child_list[0]->h_name)) {
+      if (hp->child_list.size() > 0 && hp->child_list[0] != nullptr && isSimEvent(hp->child_list[0]->h_name)) {
 
       // hSensvar NONAME [
       //     hNoop value_changed_event [
@@ -341,11 +357,15 @@ namespace systemc_hdl {
     };
 
     if (!for_info.empty()) {
-      if (hnewsens.size() >0) hp->set(hnewsens.back()->getname());
+      if (hnewsens.size() > 0) hp->set(hnewsens.back()->getname());
       hp_orig = hp; // this caused the array sens item to be generated in the for loop.
     }
-
-    else  hnewsens.back()->child_list.push_back(hp);
+    else  {
+      if (hnewsens.size() == 0) {
+        hnewsens.push_back(new hNode( "METHOD ???", hNode::hdlopsEnum::hSenslist));
+      }
+      hnewsens.back()->child_list.push_back(hp);
+    }
  
   }
   

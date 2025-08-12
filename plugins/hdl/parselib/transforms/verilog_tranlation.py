@@ -1300,25 +1300,23 @@ class VerilogTranslationPass(TopDown):
                 ind + 'logic signed [31:0] next_state_run_tmp;\n' +
                 ind + 'logic signed [31:0] next_wait_counter_run_tmp;\n' +
                 ind + 'logic signed [31:0] next_wait_next_state_run_tmp;\n' +
-                ind + 'logic [7:0] counter_value_next_tmp;\n' +
-                ind + 'logic [7:0] q_next_tmp;\n'
+                ind + 'logic [7:0] counter_value_next_tmp;\n'
             )
             defaults = (
                 ind + 'next_state_run_tmp = state_run;\n' +
                 ind + 'next_wait_counter_run_tmp = wait_counter_run;\n' +
                 ind + 'next_wait_next_state_run_tmp = wait_next_state_run;\n' +
-                ind + 'counter_value_next_tmp = _main_counter_value_scclang_global_0;\n' +
-                ind + 'q_next_tmp = counter_value_scclang_global_0;\n'
+                ind + 'counter_value_next_tmp = counter_value_scclang_global_0;\n'
             )
             # Rewrite body assignments to temps. Remove any assignments to temps before defaults to avoid multiple drivers
             body_mod = body_str
             body_mod = re.sub(r'^\s*(_next_state_run|_next_wait_counter_run|_next_wait_next_state_run)\s*=.*;$', '', body_mod, flags=re.M)
-            body_mod = re.sub(r'^\s*(counter_value_scclang_global_0|itf\.q)\s*=.*;$', '', body_mod, flags=re.M)
+            body_mod = re.sub(r'^\s*(counter_value_scclang_global_0|itf\.[A-Za-z_][A-Za-z0-9_]*)\s*=.*;$', '', body_mod, flags=re.M)
             body_mod = re.sub(r'(^|\W)_next_state_run\s*=', r"\1next_state_run_tmp =", body_mod)
             body_mod = re.sub(r'(^|\W)_next_wait_counter_run\s*=', r"\1next_wait_counter_run_tmp =", body_mod)
             body_mod = re.sub(r'(^|\W)_next_wait_next_state_run\s*=', r"\1next_wait_next_state_run_tmp =", body_mod)
             body_mod = re.sub(r'(^|\W)counter_value_scclang_global_0\s*=', r"\1counter_value_next_tmp =", body_mod)
-            body_mod = re.sub(r'(^|\W)itf\.q\s*=', r"\1q_next_tmp =", body_mod)
+            # Do not assign outputs in combinational block; outputs should be registered in sync block by downstream passes
             finals = (
                 ind + '_next_state_run = next_state_run_tmp;\n' +
                 ind + '_next_wait_counter_run = next_wait_counter_run_tmp;\n' +

@@ -1,0 +1,40 @@
+Options parser
+reset_signal 
+active_edge  
+reset_async 0
+boolboolboolsc_dt::sc_uint<8>8FieldDecl 0x724b519641a0 </home/jonguk/Projects/CXL_SWITCH/systemc-clang/examples/systemc_to_sv/counter/Counter.h:17:3, col:39> col:25 referenced counter_value 'sc_dt::sc_uint<8>':'sc_dt::sc_uint<8>'
+`-CXXConstructExpr 0x724b5136e2b8 <col:38, col:39> 'sc_dt::sc_uint<8>':'sc_dt::sc_uint<8>' 'void ()' list
+8reset_signal 
+active_edge  
+reset_async 0
+boolboolboolsc_dt::sc_uint<8>8isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for isBuiltinType
+isBuiltinType
+isBuiltinType
+isBuiltinType
+isBuiltinType
+isBuiltinType
+isBuiltinType
+isBuiltinType
+isRecordType
+isNamespace 
+@@ name is std for isRecordType
+isNamespace 
+@@ name is std for isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for isRecordType
+isNamespace 
+@@ name is sc_core for 
