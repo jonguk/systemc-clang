@@ -6,19 +6,20 @@
 ##===================================================================
 # Path for where the binaries are for clang
 # SET this.
-set -x LLVM_INSTALL_DIR /home/$USER/bin/clang-13.0.0/
+set -x LLVM_INSTALL_DIR /usr/lib/llvm-15
 #set -x LLVM_INSTALL_DIR /home/$USER/del/llvm-project/build/
 
 # Path where SystemC is installed
 # SET this.
-set -x SYSTEMC /home/$USER/code/systemc-2.3.3/systemc
+set -x SYSTEMC /usr/local
 
 # Path for systemc-clang source
-set -x SYSTEMC_CLANG /home/$USER/code/github/rseac/systemc-clang/
+set -l script_dir (dirname (status -f))
+set -x SYSTEMC_CLANG (realpath "$script_dir/..")
 
 # Path for the systemc-clang build directory
 # SET this.
-set -x SYSTEMC_CLANG_BUILD_DIR /home/$USER/code/github/rseac/systemc-clang-build/
+set -x SYSTEMC_CLANG_BUILD_DIR "$SYSTEMC_CLANG/build"
 ##===================================================================
 
 set -x LLVMCOMPONENT cppbackend
@@ -27,8 +28,8 @@ set -x LLVMCONFIG $LLVM_INSTALL_DIR/bin/llvm-config
 
 # New llvm/clang uses flags that are different than GNU gcc's
 # Alternatively, you can use gcc and g++, but some flags don't work.
-set -x CC $LLVM_INSTALL_DIR/bin/clang #clang
-set -x CXX $LLVM_INSTALL_DIR/bin/clang++
+set -x CC clang #clang
+set -x CXX clang++
 set -x LLVM_CXX_FLAGS (eval $LLVMCONFIG --cxxflags)
 
 # Generate all the flags.

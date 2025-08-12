@@ -100,11 +100,18 @@ void Model::addGlobalEvents(FindGlobalEvents::globalEventMapType eventMap) {
 void Model::addSCMain(FunctionDecl *fnDecl) { scmain_function_decl_ = fnDecl; }
 
 ModuleInstance *Model::getInstance(const std::string &instance_name) {
-  auto test_module_it =
-      std::find_if(module_instances_.begin(), module_instances_.end(),
-                   [instance_name](const auto &instance) {
-                     return (instance->getInstanceName() == instance_name);
-                   });
+  auto test_module_it = std::find_if(
+      module_instances_.begin(), module_instances_.end(),
+      [instance_name](const auto &instance) {
+        if (instance->getInstanceName() == instance_name) {
+          return true;
+        }
+        // Fallback: also match by variable name to accommodate cases where
+        // literal instance names are not propagated (e.g., function-scope
+        // VarDecls).
+        auto info = instance->getInstanceInfo();
+        return info.getVarName() == instance_name;
+      });
 
   if (test_module_it != module_instances_.end()) {
     return *test_module_it;

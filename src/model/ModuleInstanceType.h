@@ -47,7 +47,7 @@ struct ModuleInstanceType {
   void setArrayType() { is_array_ = true; }
   void setArrayParameters(ArrayParamType parm) { array_parameters_ = parm; }
   ArrayParamType getArrayParameters() { return array_parameters_; }
-  bool isArrayType() { return is_array_; }
+  bool isArrayType() const { return is_array_; }
 
   /// \brief Return the array dimension, if the module instance is an array.
   /// 0  means a single instance

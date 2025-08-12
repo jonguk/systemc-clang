@@ -4,6 +4,7 @@ from parselib.transforms import TopDown
 from ..utils import ContextManager, is_tree_type
 from dataclasses import dataclass
 import typing
+import re
 
 @dataclass(frozen=True)
 class PortDecl:
@@ -61,10 +62,17 @@ class InterfaceGeneration(TopDown):
     def hmodule(self, tree):
         with self.ctx.add_values(current_ports=[]):
             self.__push_up(tree)
+            # Generate interface name following verible's interface naming convention:
+            # lower_snake_case with '_if' suffix.
+            mod_name = tree.children[0].value
+            # Convert CamelCase/mixed to lower_snake_case conservatively
+            snake = re.sub(r'[^A-Za-z0-9]+', '_', mod_name)
+            snake = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', snake).lower().strip('_')
+            interface_name = f"{snake}_if"
             self.ctx.interfaces.append(
                 Interface(
-                    module_name=tree.children[0].value,
-                    interface_name=tree.children[0].value + '_interface',
+                    module_name=mod_name,
+                    interface_name=interface_name,
                     interfaces=self.ctx.current_ports
                 )
             )

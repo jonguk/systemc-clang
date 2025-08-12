@@ -223,7 +223,20 @@ def invoke_translation(target, argv_python):
 
     outfile = args.output
     if not outfile:
-        outfile = target + ".v"
+        # Default: name file after first declared module to satisfy verible module-filename rule.
+        # Fallback to '*_hdl.sv' if module name cannot be detected.
+        try:
+            import re
+            m = re.search(r"^\s*module\s+([A-Za-z_][A-Za-z0-9_\$]*)\s*\(", res, re.MULTILINE)
+            if m:
+                module_name = m.group(1)
+                outfile = str(Path(target).parent / f"{module_name}.sv")
+            else:
+                base, ext = os.path.splitext(target)
+                outfile = (base + ".sv") if ext == ".txt" else (target + ".sv")
+        except Exception:
+            base, ext = os.path.splitext(target)
+            outfile = (base + ".sv") if ext == ".txt" else (target + ".sv")
     with open(outfile, "w") as fout:
         fout.writelines(res)
 

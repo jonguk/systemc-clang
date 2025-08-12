@@ -29,45 +29,48 @@ IndexMapType getArrayInstanceIndex(
 
   if (auto init_expr_list = clang::dyn_cast<clang::InitListExpr>(expr)) {
     /// Retrieve the number of initializer lists.
-    clang::Expr **iexpr_set{init_expr_list->getInits()};
-
     for (std::size_t i{0}; i < init_expr_list->getNumInits(); ++i) {
       LLVM_DEBUG(llvm::dbgs() << "Iterate over init 1d lists: " << i << "\n";);
-      clang::Expr *iexpr{iexpr_set[i]};
+      clang::Expr *iexpr{init_expr_list->getInit(i)};
 
       // Level 1
       // iexpr->dump();
       if (auto cexpr = clang::dyn_cast<clang::CXXConstructExpr>(iexpr)) {
-        clang::CXXConstructExpr *nested_cexpr{
-            clang::dyn_cast<clang::CXXConstructExpr>(
-                cexpr->getArg(0)->IgnoreImplicit())};
-
-        auto cxxbindexpr{clang::dyn_cast<clang::CXXBindTemporaryExpr>(
-            nested_cexpr->getArg(0)->IgnoreParenImpCasts())};
-
-        auto cxxctor{clang::dyn_cast<clang::CXXConstructExpr>(
-            cxxbindexpr->getSubExpr()->IgnoreParenImpCasts())};
-        clang::StringLiteral *slit{clang::dyn_cast<clang::StringLiteral>(
-            cxxctor->getArg(0)->IgnoreImpCasts())};
-        //
-
-        if (slit) {
-          LLVM_DEBUG(llvm::dbgs()
-                         << "Argument 1d: [" << i << ", "
-                         << "x, x ] " << slit->getString().str() << " \n";);
-          indices.insert(
-              IndexPairType(slit->getString().str(), std::make_tuple(i, 0, 0)));
+        // Peel nested construct/temporary layers defensively until we reach
+        // the innermost construct that holds the string literal.
+        clang::CXXConstructExpr *peel = cexpr;
+        clang::CXXConstructExpr *last = nullptr;
+        while (peel) {
+          last = peel;
+          if (peel->getNumArgs() == 0 || peel->getArg(0) == nullptr) {
+            break;
+          }
+          auto next = clang::dyn_cast<clang::CXXConstructExpr>(
+              peel->getArg(0)->IgnoreImplicit());
+          if (next == nullptr) {
+            break;
+          }
+          peel = next;
+        }
+        if (last && last->getNumArgs() > 0 && last->getArg(0)) {
+          auto slit = clang::dyn_cast<clang::StringLiteral>(
+              last->getArg(0)->IgnoreImpCasts());
+          if (slit) {
+            LLVM_DEBUG(llvm::dbgs() << "Argument 1d: [" << i << ", x, x ] "
+                                    << slit->getString().str() << " \n";);
+            indices.insert(IndexPairType(slit->getString().str(),
+                                         std::make_tuple(i, 0, 0)));
+          }
         }
       }
 
       /// Level 2
       if (auto init_expr_list_2d =
               clang::dyn_cast<clang::InitListExpr>(iexpr)) {
-        clang::Expr **iexpr_2d_set{init_expr_list_2d->getInits()};
         for (std::size_t j{0}; j < init_expr_list_2d->getNumInits(); ++j) {
           LLVM_DEBUG(llvm::dbgs()
                          << "Iterate over 2d init lists: " << j << "\n";);
-          clang::Expr *iexpr_2d{iexpr_2d_set[j]};
+          clang::Expr *iexpr_2d{init_expr_list_2d->getInit(j)};
 
           /// Get the constructor argument.
           // Unwrap CXXConstructExpr
@@ -82,27 +85,29 @@ IndexMapType getArrayInstanceIndex(
           llvm::dbgs() << "unwrap 2d dump\n";
           //cexpr->dump();
 
-          if (cexpr) {  // auto cexpr =
-                        // clang::dyn_cast<clang::CXXConstructExpr>(iexpr_2d)) {
-            llvm::dbgs() << "0 arg dump\n";
-            clang::StringLiteral *slit{clang::dyn_cast<clang::StringLiteral>(
-                cexpr->getArg(0)->IgnoreImpCasts())};
-            LLVM_DEBUG(llvm::dbgs()
-                           << "Argument 2d: [" << i << ", " << j << "] "
-                           << slit->getString().str() << " \n";);
-            indices.insert(IndexPairType(slit->getString().str(),
-                                         std::make_tuple(i, j, 0)));
+          if (cexpr) {
+            if (cexpr->getNumArgs() == 0 || cexpr->getArg(0) == nullptr) {
+              continue;
+            }
+            auto slit = clang::dyn_cast<clang::StringLiteral>(
+                cexpr->getArg(0)->IgnoreImpCasts());
+            if (slit) {
+              LLVM_DEBUG(llvm::dbgs() << "Argument 2d: [" << i << ", " << j
+                                      << "] "
+                                      << slit->getString().str() << " \n";);
+              indices.insert(IndexPairType(slit->getString().str(),
+                                           std::make_tuple(i, j, 0)));
+            }
           }
 
           /// Level 3
           if (auto init_expr_list_3d =
                   clang::dyn_cast<clang::InitListExpr>(iexpr_2d)) {
-            clang::Expr **iexpr_3d_set{init_expr_list_3d->getInits()};
             init_expr_list_3d->dump();
             for (std::size_t k{0}; k < init_expr_list_3d->getNumInits(); ++k) {
               LLVM_DEBUG(llvm::dbgs()
                              << "Iterate over 3d init lists: " << k << "\n";);
-              clang::Expr *iexpr_3d{iexpr_3d_set[k]};
+              clang::Expr *iexpr_3d{init_expr_list_3d->getInit(k)};
               iexpr_3d->dump();
 
               clang::CXXConstructExpr *peel{
@@ -126,15 +131,19 @@ IndexMapType getArrayInstanceIndex(
                     // nested_cexpr->getArg(0)->IgnoreParenImpCasts())};
                 // auto cxxctor{clang::dyn_cast<clang::CXXConstructExpr>(
                     // cxxbindexpr->getSubExpr()->IgnoreParenImpCasts())};
-                clang::StringLiteral *slit{
-                    clang::dyn_cast<clang::StringLiteral>(
-                        cexpr->getArg(0)->IgnoreImpCasts())};
-                // slit->dump();
-                  LLVM_DEBUG(llvm::dbgs() << "Argument 3d: [" << i << ", " << j
-                                          << ", " << k << "] "
-                                          << slit->getString().str() << " \n";);
-                  indices.insert(IndexPairType(slit->getString().str(),
-                                               std::make_tuple(i, j, k)));
+                if (cexpr->getNumArgs() == 0 || cexpr->getArg(0) == nullptr) {
+                  continue;
+                }
+                auto slit = clang::dyn_cast<clang::StringLiteral>(
+                    cexpr->getArg(0)->IgnoreImpCasts());
+                if (slit) {
+                  LLVM_DEBUG(llvm::dbgs()
+                                 << "Argument 3d: [" << i << ", " << j
+                                 << ", " << k << "] "
+                                 << slit->getString().str() << " \n";);
+                  indices.insert(IndexPairType(
+                      slit->getString().str(), std::make_tuple(i, j, k)));
+                }
               }
             }
           }

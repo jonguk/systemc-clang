@@ -424,6 +424,14 @@ const ModuleInstance::portBindingMapType &ModuleInstance::getPortBindings() {
 std::string ModuleInstance::getName() const { return module_name_; }
 
 std::string ModuleInstance::getInstanceName() const {
+  // For array FieldDecl-based module instances, use the field variable name
+  // (e.g., submod_1d, submodules_2d, submodules_3d) as the canonical instance
+  // name so grouped instances are represented once at the module level. For
+  // non-arrays (including top-level VarDecl instances), return the string
+  // literal-based instance name.
+  if (instance_info_.isArrayType()) {
+    return instance_info_.var_name;
+  }
   return instance_info_.instance_name;
 }
 

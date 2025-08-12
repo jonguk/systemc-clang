@@ -16,12 +16,12 @@ std::string test_data_dir{"${CMAKE_BINARY_DIR}/tests/data/"};
 // Specify extra include directories in the environment variable
 // EXTRA_INCLUDE_DIR separated with semi-colon:
 // export EXTRA_INCLUDE_DIR="/first/path;/second/path"
-static std::vector<std::string> catch_test_args{
+ static std::vector<std::string> catch_test_args{
     "-D__STD_CONSTANT_MACROS",
     "-D__STDC_LIMIT_MACROS",
     ${EXTRA_INCLUDE_DIR_EXPAND}
     "-I${LLVM_INSTALL_DIR}/include",
     "-I${LLVM_INSTALL_DIR}/lib/clang/${CLANG_VERSION}/include",
     "-I${SYSTEMC_DIR}/include/",
-    "-std=c++14"};
+     "-std=c++17"};
 };  // namespace systemc_clang

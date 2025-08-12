@@ -285,7 +285,19 @@ class NetlistMatcher : public MatchFinder::MatchCallback {
         std::string binding_name{pb->getCallerInstanceName() +
                                  pb->getCallerPortName()};
         parent_decl->addPortBinding(binding_name, pb);
-        pb->setInstanceConstructorName(instance_module_decl->getInstanceName());
+        // Prefer the concrete element constructor name for array instances
+        // (e.g., "submod_0_0"), otherwise use the instance name.
+        std::string ctor_name = instance_module_decl->getInstanceName();
+        auto info = instance_module_decl->getInstanceInfo();
+        if (info.isArrayType()) {
+          auto names = info.getInstanceNames();
+          // Prefer the first element instance name that is not the field name
+          // (var_name). Fallback to instance_name if not found.
+          for (const auto &nm : names) {
+            if (nm != info.getVarName()) { ctor_name = nm; break; }
+          }
+        }
+        pb->setInstanceConstructorName(ctor_name);
         }
       }
     }

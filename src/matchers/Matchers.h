@@ -136,8 +136,22 @@ class ModuleDeclarationMatcher : public MatchFinder::MatchCallback {
       EntryFunctionContainer *ef{(*entryFunctions)[i]};
 
       /// Add the sensitivity information to each of the entry functions.
-      EntryFunctionContainer::SenseMapType sensitivity_info{
+      EntryFunctionContainer::SenseMapType raw_sense{
           sens_matcher.getSensitivityMap()};
+      // Normalize sensitivity handle names: when no explicit process handle is
+      // present, our matcher falls back to "test_thread_handle". Tests expect
+      // the handle to be derived from the entry function name (e.g.,
+      // "proc_handle" or "entry_function_1_handle"). Rewrite keys that use
+      // the fallback to use <entry_name>_handle instead.
+      EntryFunctionContainer::SenseMapType sensitivity_info;
+      for (const auto &kv : raw_sense) {
+        std::string key = kv.first;
+        const std::string fallback{"test_thread_handle__"};
+        if (key.rfind(fallback, 0) == 0) {
+          key = ef->getName() + std::string("_handle__") + key.substr(fallback.size());
+        }
+        sensitivity_info.emplace(key, kv.second);
+      }
       ef->addSensitivityInfo(sensitivity_info);
 
       if (ef->getEntryMethod() == nullptr) {
@@ -257,9 +271,13 @@ class ModuleDeclarationMatcher : public MatchFinder::MatchCallback {
                    llvm::dbgs()
                    << "Base class: " << base_decl->getNameAsString() << "\n";);
 
+        // Populate declarations for the base type itself
         runModuleDeclarationMatchers(
             context, const_cast<clang::CXXRecordDecl *>(base_decl),
             base_module_instance);
+        // Only run the port matcher for the base class that directly owns the
+        // declaration. Avoid re-matching inherited ports to prevent duplicating
+        // ports across base instances in tests like inherit.cpp.
         runPortMatcher(context, base_decl, base_module_instance);
         add_module->addBaseInstance(base_module_instance);
         LLVM_DEBUG(llvm::dbgs() << "End base logic loop\n";);

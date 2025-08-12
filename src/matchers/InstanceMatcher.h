@@ -366,8 +366,17 @@ class InstanceMatcher : public MatchFinder::MatchCallback {
     ModuleInstanceType parsed_instance{};
     parsed_instance.var_name = var_name;
     parsed_instance.var_type_name = var_type_name;
+    // For standalone VarDecl instances (e.g., in sc_main), the canonical
+    // instance name should be the string literal passed to the constructor
+    // (e.g., "dut"), not the variable name (e.g., "d"). Keep the variable
+    // name as an auxiliary alias in instance_names for reference.
     parsed_instance.instance_name = instance_name;
-    parsed_instance.add_instance_name(instance_name);
+    if (!instance_name.empty()) {
+      parsed_instance.add_instance_name(instance_name);
+    }
+    if (!var_name.empty() && var_name != instance_name) {
+      parsed_instance.add_instance_name(var_name);
+    }
     // This is the Type of the FieldDecl.
     parsed_instance.type_decl =
         instance_decl->getType().getTypePtr()->getAsCXXRecordDecl();
@@ -485,8 +494,20 @@ class InstanceMatcher : public MatchFinder::MatchCallback {
     parsed_instance.is_field_decl = true;
     parsed_instance.parent_name = parent_name;
     parsed_instance.parent_decl = parent_decl;
-    parsed_instance.instance_name = instance_name;
-    parsed_instance.add_instance_name(instance_name);
+    // If this field is an array of submodules, group under the field name.
+    // Otherwise, keep the literal instance name.
+    if (array_type) {
+      parsed_instance.instance_name = var_name;
+      parsed_instance.add_instance_name(var_name);
+      if (!instance_name.empty() && instance_name != var_name) {
+        parsed_instance.add_instance_name(instance_name);
+      }
+    } else {
+      parsed_instance.instance_name = instance_name;
+      if (!instance_name.empty()) {
+        parsed_instance.add_instance_name(instance_name);
+      }
+    }
 
     LLVM_DEBUG(parsed_instance.dump(););
     // Don't add repeated matches
@@ -504,7 +525,10 @@ class InstanceMatcher : public MatchFinder::MatchCallback {
     } else {
       // Instance IS found.
 
-      exists_instance->second.add_instance_name(instance_name);
+      // Preserve canonical field instance name, only accumulate element names.
+      if (!instance_name.empty() && instance_name != exists_instance->second.var_name) {
+        exists_instance->second.add_instance_name(instance_name);
+      }
     }
   }
 

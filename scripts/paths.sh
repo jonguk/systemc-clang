@@ -6,17 +6,20 @@
 
 # Path for where the binaries are for clang
 # SET this.
-export LLVM_INSTALL_DIR=/home/$USER/del/llvm-project/build/
+export LLVM_INSTALL_DIR=/usr/lib/llvm-15
+#export LLVM_INSTALL_DIR=/home/$USER/del/llvm-project/build/
 #export LLVM_INSTALL_DIR=/home/$USER/bin/clang-10.0.0/ 
 
 # Path where SystemC is installed
 # SET this.
-export SYSTEMC=/home/$USER/code/systemc-2.3.3/systemc/
+export SYSTEMC=/usr/local
 
+# Path for systemc-clang source
+export SYSTEMC_CLANG=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 
 # Path for the systemc-clang build directory
 # SET this.
-export SYSTEMC_CLANG_BUILD_DIR=/home/$USER/code/github/systemc-clang-build/
+export SYSTEMC_CLANG_BUILD_DIR=$SYSTEMC_CLANG/build
 ##===================================================================
 
 LLVMCOMPONENT=cppbackend

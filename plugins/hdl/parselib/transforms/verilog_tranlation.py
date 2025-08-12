@@ -1,4 +1,5 @@
 import warnings
+import re
 from .top_down import TopDown
 from ..primitives import *
 from ..utils import dprint, is_tree_type, get_ids_in_tree
@@ -445,7 +446,7 @@ class VerilogTranslationPass(TopDown):
         self.__push_up(tree)
         self.dec_indent()
         ind = self.get_current_ind_prefix()
-        res = '{}case({})\n{}\n{}endcase'.format(ind, tree.children[0], tree.children[1], ind)
+        res = '{}unique case({})\n{}\n{}endcase'.format(ind, tree.children[0], tree.children[1], ind)
         return res
 
     def breakstmt(self, tree):
@@ -507,7 +508,7 @@ class VerilogTranslationPass(TopDown):
                                 module_name = ch[0]
                                 interface_name = Interface.generate_instance_name(module_name, False)
                                 dot_access = '{}.'.format(interface_name)
-                            # assignment = f"always @(*) begin\n{ind_always}{dot_access}{ch[1]} = {ch[2]};\n{ind_end}end"
+                            # assignment = f"always_comb begin\n{ind_always}{dot_access}{ch[1]} = {ch[2]};\n{ind_end}end"
                             assignment = f"{ind}assign {dot_access}{ch[1]} = {ch[2]}"
                         res = ''.join([x[0], assignment, x[2]])
                     elif x[1].data == 'hnamedsensvar':
@@ -740,7 +741,11 @@ class VerilogTranslationPass(TopDown):
         elif self.__is_synchronous_sensitivity_list(sense_list[proc_name]):
             res = ind + 'always_ff @({}) begin: {}\n'.format(' or '.join(self.get_sense_list()[proc_name]), proc_name)
         else:
-            res = ind + 'always @({}) begin: {}\n'.format(' or '.join(self.get_sense_list()[proc_name]), proc_name)
+            # if purely combinational (always), emit always_comb; otherwise keep sensitivity list
+            if all(x == 'always' for x in self.get_sense_list()[proc_name]):
+                res = ind + 'always_comb begin: {}\n'.format(proc_name)
+            else:
+                res = ind + 'always @({}) begin: {}\n'.format(' or '.join(self.get_sense_list()[proc_name]), proc_name)
             # res = ind + 'always_comb begin: {}\n'.format(proc_name)
         self.inc_indent()
         ind = self.get_current_ind_prefix()
@@ -1054,7 +1059,7 @@ class VerilogTranslationPass(TopDown):
         res += '\n'.join(binding_str)
 
         res += '\n'
-        res += ind + "always @(*) begin\n"
+        res += ind + "always_comb begin\n"
         # res += ind + "always_comb begin\n"
         self.inc_indent()
         ind = self.get_current_ind_prefix()
@@ -1237,20 +1242,186 @@ class VerilogTranslationPass(TopDown):
 
         thread_name = self.thread_name
         sense_list = self.get_sense_list()
+        # If no sensitivity list was collected for this thread, create a sensible default.
+        # This happens when the hcode lacks explicit hSenslist entries for threads (common simple cases).
+        if thread_name not in sense_list:
+            warnings.warn(f"No sensitivity list found for thread '{thread_name}' in module {self.current_module}; defaulting to posedge clk")
+            self.senselist[thread_name] = ['posedge itf.clk']
         assert thread_name in sense_list, "Process name {} is not in module {}".format(proc_name, self.current_module)
         if is_sync:
             sense_list = self.get_sense_list()[thread_name]
-            if 'posedge clk' not in sense_list:
+            if 'posedge itf.clk' not in sense_list:
                 warnings.warn("Clock not detected in senstivity list, adding one by default")
-            sense_list = ['posedge clk'] + sense_list
+                sense_list = ['posedge itf.clk'] + sense_list
             res = ind + 'always @({}) begin: {}\n'.format(' or '.join(sense_list), proc_name)
         else:
-            res = ind + 'always @(*) begin: {}\n'.format(proc_name)
+            res = ind + 'always_comb begin: {}\n'.format(proc_name)
         self.inc_indent()
+        # Generate the body first
         self.__push_up(tree)
         proc_name, *body = tree.children
+        # If sync block contains NONAME==NONAME guard, replace it with a reset check based on interface ports
+        body_str = '\n'.join(body) + '\n'
+        try:
+            reset_name = None
+            interface = self.itf_meta.get(self.current_module, None)
+            if interface:
+                # Prefer reset-like names
+                candidates = [p.name for p in interface.interfaces]
+                # heuristic ordering
+                order = ['reset_n', 'rst_n', 'aresetn', 'reset', 'rst']
+                for key in order:
+                    for c in candidates:
+                        if c == key:
+                            reset_name = c
+                            break
+                    if reset_name:
+                        break
+                if not reset_name:
+                    # fallback: any name containing 'reset' or 'rst'
+                    for c in candidates:
+                        if 'reset' in c or 'rst' in c:
+                            reset_name = c
+                            break
+            if reset_name:
+                is_active_low = reset_name.endswith('_n') or reset_name.endswith('n')
+                cond = f'!itf.{reset_name}' if is_active_low else f'itf.{reset_name}'
+                # Robustly replace placeholder condition
+                body_str = re.sub(r"if\s*\(\(\s*NONAME\s*\)\s*==\s*\(\s*NONAME\s*\)\)", f"if ({cond})", body_str)
+        except Exception:
+            pass
+        # For combinational thread blocks, avoid multi-driving/latch/cycle by:
+        # - Collecting assignments to _next_* and *_scclang_global_* and rewriting them to temporaries
+        # - Removing any assignments to itf.* in combinational blocks
+        # - Providing sensible defaults for temporaries from their corresponding base signals
+        # - Emitting a single final mapping from temporaries back to the original signals
+        if not is_sync:
+            lines = body_str.splitlines(True)
+            next_lhs = []
+            global_lhs = []
+            itf_assign_idx = set()
+            next_re = re.compile(r'^\s*(_next_[A-Za-z0-9_#]+)\s*=')
+            glob_re = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*_scclang_global_\d+)\s*=')
+            itf_re = re.compile(r'^\s*itf\.[A-Za-z_][A-Za-z0-9_]*\s*=')
+
+            # Discover targets
+            for idx, ln in enumerate(lines):
+                if itf_re.search(ln):
+                    itf_assign_idx.add(idx)
+                    continue
+                m1 = next_re.search(ln)
+                if m1:
+                    name = m1.group(1)
+                    if name not in next_lhs:
+                        next_lhs.append(name)
+                    continue
+                m2 = glob_re.search(ln)
+                if m2:
+                    name = m2.group(1)
+                    if name not in global_lhs:
+                        global_lhs.append(name)
+
+            # Build temp names and declarations using existing types when available
+            temp_decl_lines = []
+            default_lines = []
+            final_lines = []
+
+            def _lookup_type(name: str):
+                # Try exact, with '#', and without trailing '#'
+                cand = [name]
+                if not name.endswith('#'):
+                    cand.append(name + '#')
+                else:
+                    cand.append(name[:-1])
+                for c in cand:
+                    tpe = self.get_current_module_var_type_or_default(c)
+                    if tpe is not None:
+                        return tpe
+                return None
+
+            def sanitize_next(name: str) -> str:
+                # strip leading _next_ and optional trailing '#'
+                base = re.sub(r'^_next_', '', name)
+                base = base[:-1] if base.endswith('#') else base
+                return base
+
+            # Generate for _next_*
+            for full in next_lhs:
+                base = sanitize_next(full)
+                tmp = f'__tmp_next_{base}'
+                # Try to mirror the base signal type if known
+                tpe = _lookup_type(base)
+                if tpe is not None:
+                    ctx = TypeContext(suffix='')
+                    decl = tpe.to_str(tmp, context=ctx)
+                else:
+                    # heuristic fallback for state/next counters
+                    if any(k in base for k in ['state', 'wait_counter', 'wait_next_state']):
+                        decl = f'logic signed [31:0] {tmp}'
+                    else:
+                        decl = f'logic {tmp}'
+                temp_decl_lines.append(ind + decl + ';\n')
+                default_lines.append(ind + f'{tmp} = {base};\n')
+                # final assign suppressed to avoid multi-driver with function body
+
+            # Generate for *_scclang_global_*
+            for full in global_lhs:
+                base = full
+                tmp = f'__tmp_{base}'
+                tpe = _lookup_type(base)
+                if tpe is not None:
+                    ctx = TypeContext(suffix='')
+                    decl = tpe.to_str(tmp, context=ctx)
+                else:
+                    decl = f'logic {tmp}'
+                temp_decl_lines.append(ind + decl + ';\n')
+                default_lines.append(ind + f'{tmp} = {base};\n')
+                # final assign suppressed to avoid multi-driver with function body
+
+            # Rewrite body: remove itf.* assignments, redirect next/global to temps
+            rewritten = []
+            for idx, ln in enumerate(lines):
+                if idx in itf_assign_idx:
+                    continue
+                # drop any pre-temp assignments to avoid multiple drivers
+                skip = False
+                for full in next_lhs:
+                    base = sanitize_next(full)
+                    tmp = f'__tmp_next_{base}'
+                    if re.match(rf'^\s*{re.escape(tmp)}\s*=', ln):
+                        skip = True
+                        break
+                if skip:
+                    continue
+                for full in global_lhs:
+                    tmp = f'__tmp_{full}'
+                    if re.match(rf'^\s*{re.escape(tmp)}\s*=', ln):
+                        skip = True
+                        break
+                if skip:
+                    continue
+
+                # Redirect LHS to temporaries
+                m1 = next_re.search(ln)
+                if m1:
+                    full = m1.group(1)
+                    base = sanitize_next(full)
+                    tmp = f'__tmp_next_{base}'
+                    ln = re.sub(r'^\s*_next_[A-Za-z0-9_#]+', tmp, ln)
+                else:
+                    m2 = glob_re.search(ln)
+                    if m2:
+                        full = m2.group(1)
+                        tmp = f'__tmp_{full}'
+                        ln = re.sub(rf'^\s*{re.escape(full)}', tmp, ln)
+                rewritten.append(ln)
+
+            body_str = ''.join(temp_decl_lines) + ''.join(default_lines) + ''.join(rewritten)
+
         ind = self.get_current_ind_prefix()
-        res += '\n'.join(body) + '\n'
+        # In sync block, optionally drive outputs from registered values.
+        # Leave to per-module logic; do not unconditionally assign here to avoid double-driving.
+        res += body_str
         self.dec_indent()
         ind = self.get_current_ind_prefix()
         res += ind + 'end'
