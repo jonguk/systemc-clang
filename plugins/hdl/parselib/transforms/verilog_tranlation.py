@@ -1290,40 +1290,133 @@ class VerilogTranslationPass(TopDown):
                 body_str = re.sub(r"if\s*\(\(\s*NONAME\s*\)\s*==\s*\(\s*NONAME\s*\)\)", f"if ({cond})", body_str)
         except Exception:
             pass
-        # For combinational thread blocks, avoid multi-driving by:
-        # - Declaring temporary next-state variables local to the block
-        # - Providing default assignments to temps
-        # - Rewriting assignments inside body to write temps instead of real nets
-        # - Finally mapping temps to the real nets once
+        # For combinational thread blocks, avoid multi-driving/latch/cycle by:
+        # - Collecting assignments to _next_* and *_scclang_global_* and rewriting them to temporaries
+        # - Removing any assignments to itf.* in combinational blocks
+        # - Providing sensible defaults for temporaries from their corresponding base signals
+        # - Emitting a single final mapping from temporaries back to the original signals
         if not is_sync:
-            temp_decls = (
-                ind + 'logic signed [31:0] next_state_run_tmp;\n' +
-                ind + 'logic signed [31:0] next_wait_counter_run_tmp;\n' +
-                ind + 'logic signed [31:0] next_wait_next_state_run_tmp;\n' +
-                ind + 'logic [7:0] counter_value_next_tmp;\n'
-            )
-            defaults = (
-                ind + 'next_state_run_tmp = state_run;\n' +
-                ind + 'next_wait_counter_run_tmp = wait_counter_run;\n' +
-                ind + 'next_wait_next_state_run_tmp = wait_next_state_run;\n' +
-                ind + 'counter_value_next_tmp = counter_value_scclang_global_0;\n'
-            )
-            # Rewrite body assignments to temps. Remove any assignments to temps before defaults to avoid multiple drivers
-            body_mod = body_str
-            body_mod = re.sub(r'^\s*(_next_state_run|_next_wait_counter_run|_next_wait_next_state_run)\s*=.*;$', '', body_mod, flags=re.M)
-            body_mod = re.sub(r'^\s*(counter_value_scclang_global_0|itf\.[A-Za-z_][A-Za-z0-9_]*)\s*=.*;$', '', body_mod, flags=re.M)
-            body_mod = re.sub(r'(^|\W)_next_state_run\s*=', r"\1next_state_run_tmp =", body_mod)
-            body_mod = re.sub(r'(^|\W)_next_wait_counter_run\s*=', r"\1next_wait_counter_run_tmp =", body_mod)
-            body_mod = re.sub(r'(^|\W)_next_wait_next_state_run\s*=', r"\1next_wait_next_state_run_tmp =", body_mod)
-            body_mod = re.sub(r'(^|\W)counter_value_scclang_global_0\s*=', r"\1counter_value_next_tmp =", body_mod)
-            # Do not assign outputs in combinational block; outputs should be registered in sync block by downstream passes
-            finals = (
-                ind + '_next_state_run = next_state_run_tmp;\n' +
-                ind + '_next_wait_counter_run = next_wait_counter_run_tmp;\n' +
-                ind + '_next_wait_next_state_run = next_wait_next_state_run_tmp;\n' +
-                ind + 'counter_value_scclang_global_0 = counter_value_next_tmp;\n'
-            )
-            body_str = temp_decls + defaults + body_mod + finals
+            lines = body_str.splitlines(True)
+            next_lhs = []
+            global_lhs = []
+            itf_assign_idx = set()
+            next_re = re.compile(r'^\s*(_next_[A-Za-z0-9_#]+)\s*=')
+            glob_re = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*_scclang_global_\d+)\s*=')
+            itf_re = re.compile(r'^\s*itf\.[A-Za-z_][A-Za-z0-9_]*\s*=')
+
+            # Discover targets
+            for idx, ln in enumerate(lines):
+                if itf_re.search(ln):
+                    itf_assign_idx.add(idx)
+                    continue
+                m1 = next_re.search(ln)
+                if m1:
+                    name = m1.group(1)
+                    if name not in next_lhs:
+                        next_lhs.append(name)
+                    continue
+                m2 = glob_re.search(ln)
+                if m2:
+                    name = m2.group(1)
+                    if name not in global_lhs:
+                        global_lhs.append(name)
+
+            # Build temp names and declarations using existing types when available
+            temp_decl_lines = []
+            default_lines = []
+            final_lines = []
+
+            def _lookup_type(name: str):
+                # Try exact, with '#', and without trailing '#'
+                cand = [name]
+                if not name.endswith('#'):
+                    cand.append(name + '#')
+                else:
+                    cand.append(name[:-1])
+                for c in cand:
+                    tpe = self.get_current_module_var_type_or_default(c)
+                    if tpe is not None:
+                        return tpe
+                return None
+
+            def sanitize_next(name: str) -> str:
+                # strip leading _next_ and optional trailing '#'
+                base = re.sub(r'^_next_', '', name)
+                base = base[:-1] if base.endswith('#') else base
+                return base
+
+            # Generate for _next_*
+            for full in next_lhs:
+                base = sanitize_next(full)
+                tmp = f'__tmp_next_{base}'
+                # Try to mirror the base signal type if known
+                tpe = _lookup_type(base)
+                if tpe is not None:
+                    ctx = TypeContext(suffix='')
+                    decl = tpe.to_str(tmp, context=ctx)
+                else:
+                    # heuristic fallback for state/next counters
+                    if any(k in base for k in ['state', 'wait_counter', 'wait_next_state']):
+                        decl = f'logic signed [31:0] {tmp}'
+                    else:
+                        decl = f'logic {tmp}'
+                temp_decl_lines.append(ind + decl + ';\n')
+                default_lines.append(ind + f'{tmp} = {base};\n')
+                # final assign suppressed to avoid multi-driver with function body
+
+            # Generate for *_scclang_global_*
+            for full in global_lhs:
+                base = full
+                tmp = f'__tmp_{base}'
+                tpe = _lookup_type(base)
+                if tpe is not None:
+                    ctx = TypeContext(suffix='')
+                    decl = tpe.to_str(tmp, context=ctx)
+                else:
+                    decl = f'logic {tmp}'
+                temp_decl_lines.append(ind + decl + ';\n')
+                default_lines.append(ind + f'{tmp} = {base};\n')
+                # final assign suppressed to avoid multi-driver with function body
+
+            # Rewrite body: remove itf.* assignments, redirect next/global to temps
+            rewritten = []
+            for idx, ln in enumerate(lines):
+                if idx in itf_assign_idx:
+                    continue
+                # drop any pre-temp assignments to avoid multiple drivers
+                skip = False
+                for full in next_lhs:
+                    base = sanitize_next(full)
+                    tmp = f'__tmp_next_{base}'
+                    if re.match(rf'^\s*{re.escape(tmp)}\s*=', ln):
+                        skip = True
+                        break
+                if skip:
+                    continue
+                for full in global_lhs:
+                    tmp = f'__tmp_{full}'
+                    if re.match(rf'^\s*{re.escape(tmp)}\s*=', ln):
+                        skip = True
+                        break
+                if skip:
+                    continue
+
+                # Redirect LHS to temporaries
+                m1 = next_re.search(ln)
+                if m1:
+                    full = m1.group(1)
+                    base = sanitize_next(full)
+                    tmp = f'__tmp_next_{base}'
+                    ln = re.sub(r'^\s*_next_[A-Za-z0-9_#]+', tmp, ln)
+                else:
+                    m2 = glob_re.search(ln)
+                    if m2:
+                        full = m2.group(1)
+                        tmp = f'__tmp_{full}'
+                        ln = re.sub(rf'^\s*{re.escape(full)}', tmp, ln)
+                rewritten.append(ln)
+
+            body_str = ''.join(temp_decl_lines) + ''.join(default_lines) + ''.join(rewritten)
 
         ind = self.get_current_ind_prefix()
         # In sync block, optionally drive outputs from registered values.

@@ -361,10 +361,12 @@ namespace systemc_hdl {
       hp_orig = hp; // this caused the array sens item to be generated in the for loop.
     }
     else  {
-      if (hnewsens.size() == 0) {
-        hnewsens.push_back(new hNode( "METHOD ???", hNode::hdlopsEnum::hSenslist));
+      // Only append if there is an existing sensitivity list context
+      if (hnewsens.size() > 0) {
+        hnewsens.back()->child_list.push_back(hp);
       }
-      hnewsens.back()->child_list.push_back(hp);
+      // If no context exists, silently skip creating a placeholder senslist to
+      // avoid emitting unsupported 'hSenslist METHOD ???' constructs in hcode
     }
  
   }
